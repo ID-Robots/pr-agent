@@ -211,6 +211,8 @@ PER_DIRECTORY_HOST_ONLY_KEYS_BY_SECTION = {
         "inline_key_issues", "enable_review_labels_security",
         "enable_review_labels_effort", "require_estimate_effort_to_review",
         "require_security_review", "require_ticket_analysis_review", "max_previous_findings_chars",
+        # The coderabbit output style publishes every finding inline, like inline_key_issues.
+        "output_style",
     }),
     "pr_description": frozenset({
         "publish_labels", "enable_large_pr_handling", "max_ai_calls", "async_ai_calls",
@@ -230,6 +232,8 @@ PER_DIRECTORY_HOST_ONLY_KEYS_BY_SECTION = {
         # Dual publishing posts every suggestion at or above the threshold through the same
         # inline path, so a nested file must not be able to turn it on either.
         "dual_publishing_score_threshold",
+        # The coderabbit output style publishes every suggestion inline, so it is root-controlled too.
+        "output_style",
         "max_number_of_calls", "parallel_calls", "max_discussion_context_chars",
         "demand_code_suggestions_self_review",
     }),
