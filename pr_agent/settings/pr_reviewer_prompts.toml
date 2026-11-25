@@ -72,6 +72,11 @@ class KeyIssuesComponentLink(BaseModel):
     issue_content: str = Field(description="A short and concise description of the issue, why it matters, and the specific scenario or input that triggers it. Do not mention line numbers in this field.")
     start_line: int = Field(description="The start line that corresponds to this issue in the relevant file")
     end_line: int = Field(description="The end line that corresponds to this issue in the relevant file")
+{%- if coderabbit_style is defined and coderabbit_style %}
+    issue_title: str = Field(description="One plain sentence that states the problem, ending with a period. For example: 'The retry loop never stops when the server keeps failing.'")
+    severity: str = Field(description="Exactly one of: 'Critical' (data loss, security hole, or a crash on a common path), 'Major' (wrong behavior users will hit), 'Minor' (an edge case or limited impact), 'Trivial' (cosmetic or very low impact)")
+    effort: str = Field(description="The effort to fix it, exactly one of: 'Quick win' (a few lines), 'Moderate' (a focused change in one place), 'Larger change' (several places or a design change)")
+{%- endif %}
 
 {%- if require_todo_scan %}
 class TodoSection(BaseModel):
@@ -211,6 +216,12 @@ review:
         ...
       start_line: 12
       end_line: 14
+{%- if coderabbit_style is defined and coderabbit_style %}
+      issue_title: |
+        ...
+      severity: Major
+      effort: Quick win
+{%- endif %}
     - ...
   security_concerns: |
     No
@@ -412,6 +423,12 @@ review:
         ...
       start_line: ...
       end_line: ...
+{%- if coderabbit_style is defined and coderabbit_style %}
+      issue_title: |
+        ...
+      severity: ...
+      effort: ...
+{%- endif %}
     - ...
   security_concerns: |
     No

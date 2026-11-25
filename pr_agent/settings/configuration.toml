@@ -73,6 +73,7 @@ cli_mode=false
 output_relevant_configurations=false
 output_run_details=false # if true, append an agent run details section (model, tokens, time cost, AI calls) to generated PR comments
 output_run_cost=false # if true, collect estimated LiteLLM API cost and include it inside the enabled run details section
+output_style="" # "" (default layout) or "coderabbit": on GitHub, /review and /improve post one review of inline findings
 large_patch_policy = "clip" # "clip" (default) or "skip"; a missing value is treated as "clip"
 duplicate_prompt_examples = false
 # Enable persistent inline comments (issue #2037) to fingerprint each inline comment and
@@ -200,6 +201,8 @@ persistent_finding_state=true # Persist review finding state across complete rev
 max_previous_findings_chars = 8000
 
 inline_key_issues=false # Publish each review finding as an inline comment where the provider can verify inline-comment publication (GitHub, Bitbucket Cloud, Azure DevOps, GitLab, Gitea).
+output_style="" # overrides config.output_style for /review when non-empty: "" (default layout) or "coderabbit"
+keep_review_guide_comment=false # with output_style "coderabbit", also post the persistent PR Reviewer Guide comment
 extra_instructions = ""
 num_max_findings = 3
 final_update_message = true
@@ -263,6 +266,7 @@ extra_instructions = ""
 [pr_code_suggestions] # /improve #
 # Deprecated alias still accepted until 1.0: pr_code_suggestions.commitable_code_suggestions
 committable_code_suggestions = false
+output_style="" # overrides config.output_style for /improve when non-empty: "" (default layout) or "coderabbit"
 # Not settable from a per-directory .pr_agent.toml. -1 or 0 disables, [1-10] also publishes suggestions scoring >= it as committable, besides the table.
 dual_publishing_score_threshold=-1
 focus_only_on_problems=true

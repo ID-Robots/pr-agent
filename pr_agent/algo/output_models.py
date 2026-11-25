@@ -21,6 +21,10 @@ class KeyIssuesComponentLink(BaseModel):
     issue_content: str
     start_line: int
     end_line: int
+    # Asked for only by the coderabbit output style; a missing value falls back to a default.
+    issue_title: str | None = None
+    severity: str | None = None
+    effort: str | None = None
 
 
 class TodoSection(BaseModel):
@@ -113,6 +117,9 @@ class CodeSuggestion(BaseModel):
     improved_code: str
     one_sentence_summary: str
     label: str
+    # Asked for only by the coderabbit output style; a missing value falls back to a default.
+    suggestion_title: str | None = None
+    effort: str | None = None
 
 
 class PRCodeSuggestions(BaseModel):
