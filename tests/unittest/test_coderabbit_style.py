@@ -305,6 +305,12 @@ def test_review_body_respects_the_size_limit():
     assert len(body) <= 10000
     assert body.startswith("**Actionable comments posted: 199**")
     assert body.endswith("</details>")
+    # Whole parts are dropped, so no code fence or <details> block is left open.
+    assert "_(review body truncated)_" in body
+    assert body.count("<details>") == body.count("</details>")
+    assert body.count("<blockquote>") == body.count("</blockquote>")
+    assert len(re.findall(r"^`{3,}", body, re.MULTILINE)) % 2 == 0
+    assert "Outside diff range comments" in body and "Prompt to fix all issues" not in body
 
 
 def test_commit_range_for_full_and_incremental_reviews():
@@ -652,6 +658,20 @@ async def test_improve_falls_back_to_inline_comments_when_the_review_fails(coder
 
     await tool.push_inline_code_suggestions({"code_suggestions": [_code_suggestion()]})
 
+    provider.publish_code_suggestions.assert_called_once()
+    assert provider.publish_code_suggestions.call_args.args[0][0]["body"].startswith("**Suggestion:**")
+
+
+@pytest.mark.asyncio
+async def test_improve_falls_back_to_inline_comments_when_the_review_cannot_be_built(coderabbit, monkeypatch):
+    provider = _github()
+    tool = _improver(provider)
+    monkeypatch.setattr(tool, "_push_coderabbit_suggestions", MagicMock(side_effect=RuntimeError("boom")))
+    provider.publish_code_suggestions = MagicMock(return_value=True)
+
+    await tool.push_inline_code_suggestions({"code_suggestions": [_code_suggestion()]})
+
+    assert not _review_calls(provider)
     provider.publish_code_suggestions.assert_called_once()
     assert provider.publish_code_suggestions.call_args.args[0][0]["body"].startswith("**Suggestion:**")
 

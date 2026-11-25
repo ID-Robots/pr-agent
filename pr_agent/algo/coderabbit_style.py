@@ -544,21 +544,26 @@ def render_review_body(posted: list[Finding], outside: list[Finding], info: dict
     ``posted`` are the findings posted inline in this review, ``outside`` the ones that could not be
     anchored to a diff line. ``info`` holds the ``render_review_info`` keyword arguments.
     """
-    sections = [f"**Actionable comments posted: {len(posted)}**"]
-    if outside:
-        sections.append(_render_outside(outside))
-    findings = [*posted, *outside]
-    if findings:
-        sections.append(_prompt_details("🤖 Prompt to fix all issues", render_fix_all_prompt(findings)))
+    headline = f"**Actionable comments posted: {len(posted)}**"
+    info_section = render_review_info(**(info or {}))
+    shown = list(outside)
+    optional = []
+    if posted or outside:
+        optional.append(_prompt_details("🤖 Prompt to fix all issues", render_fix_all_prompt([*posted, *outside])))
     if footer and footer.strip():
-        sections.append(footer.strip())
-    sections.append(render_review_info(**(info or {})))
-    body = "\n\n".join(sections)
+        optional.append(footer.strip())
+
+    def build(note: bool) -> str:
+        parts = [headline, *([_render_outside(shown)] if shown else []), *optional]
+        return "\n\n".join([*parts, *(["_(review body truncated)_"] if note else []), info_section])
+
+    body = build(False)
     if max_chars is not None and len(body) > max_chars:
-        info_section = sections[-1]
-        head = "\n\n".join(sections[:-1])
-        room = max(0, max_chars - len(info_section) - 40)
-        body = f"{_clip(head, room)}\n\n_(review body truncated)_\n\n{info_section}"
+        # Shrink by whole parts, never by cutting inside one: a cut can leave a code fence or <details>
+        # open and swallow the rest of the body. The footer goes first, then the prompt, then the
+        # outside-diff findings from the last one.
+        while len(body := build(True)) > max_chars and (optional or shown):
+            optional.pop() if optional else shown.pop()
         body = body[:max_chars]
     return body
 

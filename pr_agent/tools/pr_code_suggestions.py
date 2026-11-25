@@ -1636,7 +1636,12 @@ class PRCodeSuggestions:
                 code_suggestions.append(rendered_suggestion)
 
         if coderabbit:
-            if self._push_coderabbit_suggestions(coderabbit_items, coverage_footer):
+            try:
+                published_as_review = self._push_coderabbit_suggestions(coderabbit_items, coverage_footer)
+            except Exception as e:
+                get_logger().warning(f"Failed to build the code suggestions review, error: {e}")
+                published_as_review = False
+            if published_as_review:
                 self._output_published = True
                 return
             get_logger().warning("Falling back to publishing the code suggestions as separate inline comments")
