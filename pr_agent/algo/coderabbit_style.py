@@ -73,7 +73,7 @@ _EFFORT_SYNONYMS = {
 
 _HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _SUGGESTION_FENCE_RE = re.compile(r"(`{3,}|~{3,})[ \t]*suggestion\b", re.IGNORECASE)
-_FENCE_LINE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})", re.MULTILINE)
+_FENCE_LINE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 _HTML_TAG_RE = re.compile(r"<[^<>]{0,200}>")
 _WS_RE = re.compile(r"\s+")
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -220,10 +220,18 @@ def _neutralize(text: str) -> str:
 
 def _balance_fences(text: str) -> str:
     """Close a code fence the model left open, so it cannot swallow the rest of the comment."""
-    fences = _FENCE_LINE_RE.findall(text)
-    if len(fences) % 2:
-        text = f"{text}\n{fences[-1]}"
-    return text
+    opened = ""
+    for line in text.splitlines():
+        match = _FENCE_LINE_RE.match(line)
+        if not match:
+            continue
+        fence = match.group(1)
+        if not opened:
+            opened = fence
+        elif fence[0] == opened[0] and len(fence) >= len(opened) and not line[match.end():].strip():
+            # Only a fence of the same character, at least as long and with no info string closes a block.
+            opened = ""
+    return f"{text}\n{opened}" if opened else text
 
 
 def _clip(text: str, max_chars: int) -> str:

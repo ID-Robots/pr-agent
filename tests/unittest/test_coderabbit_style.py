@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import jinja2
 import pytest
 from github import GithubException
+from jinja2.sandbox import SandboxedEnvironment
 
 from pr_agent.algo import coderabbit_style as cs
 from pr_agent.algo.types import FilePatchInfo
@@ -227,6 +228,32 @@ def test_inline_body_neutralizes_model_text():
     assert len(re.findall(r"^```", explanation, re.MULTILINE)) % 2 == 0
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("a\n```py\nx = 1", "a\n```py\nx = 1\n```"),              # left open
+    ("```\nx\n```", "```\nx\n```"),                           # closed
+    ("````\n```\nx\n```", "````\n```\nx\n```\n````"),         # a shorter fence does not close
+    ("```\n~~~\nx", "```\n~~~\nx\n```"),                       # another fence character does not close
+    ("```\nx\n```py", "```\nx\n```py\n```"),                   # a fence with an info string does not close
+    ("```\nx\n```\n~~~\ny", "```\nx\n```\n~~~\ny\n~~~"),      # the open block is closed with its own fence
+])
+def test_open_code_fence_is_closed_with_its_own_fence(text, expected):
+    assert cs._balance_fences(text) == expected
+
+
+def test_layout_fields_accept_numbers_and_ignore_other_types():
+    from pr_agent.algo.output_models import CodeSuggestion, KeyIssuesComponentLink
+
+    issue = KeyIssuesComponentLink.model_validate({
+        "relevant_file": "a.py", "issue_header": "h", "issue_content": "c", "start_line": 1, "end_line": 2,
+        "issue_title": ["not", "text"], "severity": 8, "effort": True})
+    assert (issue.issue_title, issue.severity, issue.effort) == (None, "8", None)
+    assert cs.normalize_severity(issue.severity) == "Major"
+    suggestion = CodeSuggestion.model_validate({
+        "relevant_file": "a.py", "language": "python", "existing_code": "x", "suggestion_content": "c",
+        "improved_code": "y", "one_sentence_summary": "s", "label": "l", "suggestion_title": 5, "effort": {}})
+    assert (suggestion.suggestion_title, suggestion.effort) == ("5", None)
+
+
 def test_prompt_fence_is_longer_than_backticks_in_the_finding():
     body = cs.render_inline_body(_finding(explanation="Use ````quadruple```` fences."))
     assert "`````\nThe review comment below" in body
@@ -328,6 +355,16 @@ def test_github_moves_rejected_comments_to_the_body_after_a_422(monkeypatch):
     assert retry["body"] == "rejected=[1]"
     assert [comment["body"] for comment in retry["comments"]] == ["good"]
     assert provider.get_recent_inline_comment_bodies() == ["good"]
+
+
+def test_github_422_with_no_rejected_comment_is_not_retried(monkeypatch):
+    monkeypatch.setattr("pr_agent.git_providers.github_provider.time.sleep", lambda _seconds: None)
+    provider = _github()
+    provider.pr.create_review.side_effect = GithubException(422, {"message": "Unprocessable"})
+    provider._verify_code_comment = lambda comment: (True, None)
+    with pytest.raises(GithubException):
+        provider.publish_review_with_body([_suggestion_comment("app.js", 2, 2)], lambda _rejected: "x")
+    provider.pr.create_review.assert_called_once()
 
 
 def test_github_review_errors_other_than_422_propagate():
@@ -668,7 +705,7 @@ _MODE_BLOCK_RE = re.compile(r"\s*\{%- if coderabbit_style is defined and coderab
 @pytest.mark.parametrize("relative_path", sorted(_PROMPTS))
 def test_prompts_ask_for_the_layout_fields_only_in_the_mode(relative_path):
     section, field = _PROMPTS[relative_path]
-    environment = jinja2.Environment(undefined=jinja2.ChainableUndefined)
+    environment = SandboxedEnvironment(undefined=jinja2.ChainableUndefined)
     for part in ("system", "user"):
         template = get_settings().get(section)[part]
         off = environment.from_string(template).render(coderabbit_style=False)
@@ -703,8 +740,8 @@ def test_coderabbit_prompt_flag_is_always_in_the_vars(settings, monkeypatch, out
         monkeypatch.setattr(module, "get_skills_context", lambda: "")
         monkeypatch.setattr(module, "build_repo_context", lambda _provider: "")
 
-    reviewer = PRReviewer("https://example.invalid/pr/1", ai_handler=lambda: SimpleNamespace())
-    improver = PRCodeSuggestions("https://example.invalid/pr/1", ai_handler=lambda: SimpleNamespace())
+    reviewer = PRReviewer("https://example.invalid/pr/1", ai_handler=SimpleNamespace)
+    improver = PRCodeSuggestions("https://example.invalid/pr/1", ai_handler=SimpleNamespace)
 
     assert reviewer.vars["coderabbit_style"] is bool(output_style)
     assert improver.vars["coderabbit_style"] is bool(output_style)

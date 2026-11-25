@@ -1335,6 +1335,8 @@ class GithubProvider(GitProvider):
             get_logger().info("GitHub rejected the review comments; checking each comment on its own")
             invalid = {id(comment) for comment, _ in self._verify_code_comments(payloads)[1]}
             rejected = [index for index, payload in enumerate(payloads) if id(payload) in invalid]
+            if not rejected:
+                raise  # no comment is at fault, so the same review would be rejected again
             payloads = [payload for payload in payloads if id(payload) not in invalid]
             body = self.limit_output_characters(build_body(rejected), self.max_comment_chars)
             self.pr.create_review(commit=self.last_commit_id, body=body, event="COMMENT", comments=payloads)
