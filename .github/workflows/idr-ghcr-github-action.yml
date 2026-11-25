@@ -1,0 +1,144 @@
+# Builds the github_action image of this fork (the docker/Dockerfile target upstream publishes as
+# pragent/pr-agent:<version>-github_action) and pushes it to ghcr.io/id-robots/pr-agent.
+# It runs only when a v0.50.0-idr.<n> tag is pushed on a commit of main, never from a pull request.
+# See docs/idr-coderabbit-style.md for the release steps.
+name: Publish GHCR github_action image
+
+on:
+  push:
+    tags:
+      - 'v0.50.0-idr.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: idr-ghcr-github-action-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'ID-Robots/pr-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/id-robots/pr-agent
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve tag and require it on main
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG_PATTERN='^v0\.50\.0-idr\.[0-9]+$'
+          if ! [[ "$GITHUB_REF_NAME" =~ $TAG_PATTERN ]]; then
+            echo "::error::The tag must match v0.50.0-idr.<n>."
+            printf 'Rejected tag: %q\n' "$GITHUB_REF_NAME"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}^{commit}" refs/remotes/origin/main; then
+            echo "::error::The tagged commit must be part of main history."
+            exit 1
+          fi
+          RELEASE="${GITHUB_REF_NAME#v}"
+          {
+            echo "release=${RELEASE}"
+            # 0.50.0-idr.<n> is not a valid PEP 440 version; 0.50.0+idr.<n> is (local version label).
+            echo "version=${RELEASE/-idr./+idr.}"
+            echo "image_tag=${IMAGE}:${RELEASE}-github_action"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set version in pyproject.toml
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: python3 scripts/set_pyproject_version.py "$VERSION"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
+        with:
+          # amd64 is the runner's native arch; only arm64 needs emulation.
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6  # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: github_action
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/ID-Robots/pr-agent
+            org.opencontainers.image.licenses=AGPL-3.0
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          # A multi-platform push is an image index: annotate it too, so registries that read the
+          # index (GHCR links the package to the repository from it) see the same metadata.
+          annotations: |
+            index:org.opencontainers.image.source=https://github.com/ID-Robots/pr-agent
+            index:org.opencontainers.image.licenses=AGPL-3.0
+            index:org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            index:org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Write job summary
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The build did not report an image digest."
+            exit 1
+          fi
+          # A workflow token cannot be relied on to change a package's visibility, so only read it.
+          VISIBILITY="$(gh api "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/pr-agent" \
+            --jq '.visibility' 2>/dev/null || true)"
+          case "$VISIBILITY" in
+            public|private|internal) ;;
+            *) VISIBILITY="unknown (the token could not read it)" ;;
+          esac
+          {
+            echo "## GitHub Action image published"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Image tag | \`${IMAGE_TAG}\` |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| Pinned reference | \`${IMAGE}@${DIGEST}\` |"
+            echo "| pyproject.toml version | \`${VERSION}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Package visibility | ${VISIBILITY} |"
+            echo
+            echo "Use it in a workflow step:"
+            echo
+            echo '```yaml'
+            echo "uses: docker://${IMAGE}@${DIGEST}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$VISIBILITY" != "public" ]; then
+            MESSAGE="Package visibility is ${VISIBILITY}, not public, so other repositories cannot pull the image."
+            MESSAGE="${MESSAGE} One-time fix by an org admin: open the pr-agent package, Package settings >"
+            MESSAGE="${MESSAGE} Change visibility > Public."
+            echo "::warning::${MESSAGE}"
+            {
+              echo
+              echo "> [!WARNING]"
+              echo "> ${MESSAGE}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

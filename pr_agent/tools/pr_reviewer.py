@@ -6,6 +6,7 @@ from functools import partial
 
 from pydantic import ValidationError
 
+from pr_agent.algo import coderabbit_style
 from pr_agent.algo.ai_handlers.base_ai_handler import BaseAiHandler
 from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
 from pr_agent.algo.artifacts import get_artifact_context, prompt_boundary_markers, resolve_artifact_path
@@ -191,6 +192,9 @@ class PRReviewer:
     review_all_issues = None
     review_chunk_hit_limit = None
     partial_files_list = ()
+    # Set once the coderabbit output style posted its pull-request review (or chose to post
+    # nothing), so run() skips the PR Reviewer Guide comment unless keep_review_guide_comment.
+    _coderabbit_review_handled = False
 
     def __init__(self, pr_url: str, is_answer: bool = False, is_auto: bool = False, args: list = None,
                  ai_handler: partial[BaseAiHandler,] = LiteLLMAIHandler):
@@ -287,6 +291,7 @@ class PRReviewer:
             "related_tickets_omitted": 0,
             'duplicate_prompt_examples': get_settings().config.get('duplicate_prompt_examples', False),
             "date": datetime.datetime.now().strftime('%Y-%m-%d'),
+            "coderabbit_style": self._coderabbit_style_enabled(),
         }
 
     def parse_incremental(self, args: list[str]):
@@ -401,6 +406,10 @@ class PRReviewer:
                     reason += ": no major issues detected."
                 get_logger().info(reason)
                 get_settings().data = {"artifact": pr_review}
+                return
+
+            if self._coderabbit_review_handled and not self._keep_review_guide_comment():
+                get_logger().info("Review posted as a pull-request review; skipping the PR Reviewer Guide comment")
                 return
 
             # publish the review
@@ -542,9 +551,22 @@ class PRReviewer:
             if not review_failed and self._structured_review_data is not None:
                 write_review_json_output(self._structured_review_data)
 
+    def _coderabbit_style_enabled(self) -> bool:
+        settings = get_settings()
+        return coderabbit_style.is_coderabbit_style(settings.pr_reviewer.get("output_style", ""),
+                                                    settings.config.get("output_style", ""),
+                                                    getattr(self, "git_provider", None))
+
+    @staticmethod
+    def _keep_review_guide_comment() -> bool:
+        return _as_bool(get_settings().pr_reviewer.get("keep_review_guide_comment", False))
+
     def _review_finding_state_enabled(self) -> bool:
         settings = get_settings()
         if not settings.config.publish_output:
+            return False
+        if self._coderabbit_style_enabled() and not self._keep_review_guide_comment():
+            # The finding state lives in the PR Reviewer Guide comment, which this mode does not post.
             return False
         if not settings.pr_reviewer.get("persistent_comment", True):
             return False
@@ -1271,7 +1293,7 @@ class PRReviewer:
         return load_yaml(prediction.strip(),
                          keys_fix_yaml=["ticket_compliance_check", "estimated_effort_to_review_[1-5]:", "risk_level:",
                                         "merge_recommendation:", "security_concerns:", "key_issues_to_review:",
-                                        "relevant_file:", "relevant_line:", "suggestion:"],
+                                        "relevant_file:", "relevant_line:", "suggestion:", "issue_title:"],
                         first_key='review', last_key='security_concerns')
 
     def _validate_review_schema(self, data: object) -> bool:
@@ -1387,7 +1409,9 @@ class PRReviewer:
             data['review']['key_issues_to_review'] = key_issues_to_review
 
         self._prepare_review_finding_state(data)
-        if get_settings().config.publish_output and get_settings().pr_reviewer.get('inline_key_issues', False):
+        self._coderabbit_review_handled = False
+        if get_settings().config.publish_output and (get_settings().pr_reviewer.get('inline_key_issues', False)
+                                                     or self._coderabbit_style_enabled()):
             data = self._publish_key_issues_as_inline_comments(data)
 
         incremental_review_markdown_text = None
@@ -1559,8 +1583,14 @@ class PRReviewer:
         return {fingerprint for fingerprint in fingerprints if store.seen(fingerprint)}
 
     def _publish_key_issues_as_inline_comments(self, data: dict) -> dict:
+        coderabbit = self._coderabbit_style_enabled()
         issues = (data.get("review") or {}).get("key_issues_to_review")
         if not isinstance(issues, list) or not issues:
+            if coderabbit:
+                try:
+                    self._publish_coderabbit_review([], [], [])
+                except Exception as e:
+                    get_logger().warning(f"Failed to publish the review, error: {e}")
             return data
         if not self._can_verify_inline_key_issue_publication():
             get_logger().info("Inline key-issue publishing is not verifiable for this provider; "
@@ -1585,14 +1615,17 @@ class PRReviewer:
         candidate_issues = {}
         candidate_fingerprints = {}
         published = 0
+        existing_findings = coderabbit_style.existing_finding_ranges(self.git_provider) if coderabbit else {}
         for issue in issues:
             try:
                 comment = self._build_key_issue_comment(issue, diff_files)
-                if comment is None:
+                if comment is None or coderabbit and not self._anchor_coderabbit_comment(comment, diff_files):
                     remaining_issues.append(issue)
                     continue
                 fingerprint = key_issue_fingerprint(comment["relevant_file"], comment["body"])
-                if store.seen(fingerprint):
+                if store.seen(fingerprint) or coderabbit_style.overlaps_existing_finding(
+                        existing_findings, comment["relevant_file"], comment["relevant_lines_start"],
+                        comment["relevant_lines_end"]):
                     published += 1
                     continue
                 location_fingerprint = key_issue_location_fingerprint(
@@ -1606,6 +1639,10 @@ class PRReviewer:
                      if isinstance(getattr(self.git_provider, attr, None), int)),
                     None,
                 )
+                if coderabbit:
+                    # The fingerprints above stay on the plain finding text, so they match across runs.
+                    comment["body"] = coderabbit_style.render_inline_body(
+                        self._coderabbit_finding(issue, comment), max_chars and max_chars - 200)
                 comment["body"] = key_issue_body_with_markers(
                     comment["body"], fingerprint, location_fingerprint,
                     max_chars, self.git_provider)
@@ -1617,9 +1654,20 @@ class PRReviewer:
                                      artifact={"issue": issue})
                 remaining_issues.append(issue)
 
+        if coderabbit and not candidate_comments:
+            try:
+                self._publish_coderabbit_review([], [], remaining_issues, skipped=published)
+            except Exception as e:
+                get_logger().warning(f"Failed to publish the review, error: {e}")
         if candidate_comments:
             try:
-                self.git_provider.publish_code_suggestions(list(candidate_comments.values()))
+                if coderabbit:
+                    self._publish_coderabbit_review(
+                        list(candidate_comments.values()),
+                        [candidate_issues[location][0] for location in candidate_comments],
+                        remaining_issues, skipped=published)
+                else:
+                    self.git_provider.publish_code_suggestions(list(candidate_comments.values()))
             except Exception as e:
                 locations = [{"relevant_file": comment["relevant_file"],
                               "start_line": comment["relevant_lines_start"],
@@ -1653,6 +1701,54 @@ class PRReviewer:
         else:
             data["review"].pop("key_issues_to_review", None)
         return data
+
+    @staticmethod
+    def _anchor_coderabbit_comment(comment: dict, diff_files: dict) -> bool:
+        """Move a finding into the closest diff hunk, or report that it cannot be anchored there."""
+        file = diff_files.get(comment["relevant_file"])
+        anchor = coderabbit_style.anchor_in_hunks(getattr(file, "patch", ""), comment["relevant_lines_start"],
+                                                  comment["relevant_lines_end"])
+        if anchor is None:
+            get_logger().info("Review finding is outside the diff hunks, listing it in the review body",
+                              artifact={"relevant_file": comment["relevant_file"],
+                                        "start_line": comment["relevant_lines_start"],
+                                        "end_line": comment["relevant_lines_end"]})
+            return False
+        comment["relevant_lines_start"], comment["relevant_lines_end"] = anchor
+        return True
+
+    @staticmethod
+    def _coderabbit_finding(issue: dict, comment: dict) -> coderabbit_style.Finding:
+        return coderabbit_style.finding_from_review_issue(
+            issue, comment["relevant_file"], comment["relevant_lines_start"], comment["relevant_lines_end"])
+
+    def _publish_coderabbit_review(self, comments: list[dict], comment_issues: list, outside_issues: list,
+                                   skipped: int = 0) -> None:
+        """Post the findings as ONE pull-request review: the inline comments and a summary body."""
+        posted = [self._coderabbit_finding(issue, comment)
+                  for issue, comment in zip(comment_issues, comments, strict=True)]
+        outside = [coderabbit_style.finding_from_review_issue(issue) for issue in outside_issues]
+        # A run with failed parts is always posted: its review body carries the incomplete-coverage warning.
+        if not posted and not outside and not getattr(self, "review_failed_chunk_count", 0) and not _as_bool(
+                get_settings().pr_reviewer.get("publish_output_no_suggestions", True)):
+            get_logger().info("No new review findings to post")
+            self._coderabbit_review_handled = True
+            return
+        info = coderabbit_style.review_info(self.git_provider, getattr(self, "incremental", None),
+                                            get_run_details(), get_settings().config.get("model", ""),
+                                            getattr(self, "remaining_files_list", None), skipped,
+                                            getattr(self, "partial_files_list", None),
+                                            getattr(self, "review_failed_chunk_count", 0))
+        max_chars = getattr(self.git_provider, "max_comment_chars", None)
+
+        def build_body(rejected: list[int]) -> str:
+            return coderabbit_style.render_review_body(
+                [finding for index, finding in enumerate(posted) if index not in rejected],
+                outside + [finding for index, finding in enumerate(posted) if index in rejected],
+                info, max_chars=max_chars)
+
+        self.git_provider.publish_review_with_body(comments, build_body)
+        self._coderabbit_review_handled = True
 
     def _get_user_answers(self) -> tuple[str, str]:
         """

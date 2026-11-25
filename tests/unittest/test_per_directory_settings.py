@@ -642,6 +642,8 @@ num_max_findings = 4
 enable_large_pr_chunking = true
 max_number_of_calls = 9999
 inline_key_issues = true
+# The coderabbit output style publishes findings inline too, so it is denied per directory.
+output_style = "coderabbit"
 enable_review_labels_security = false
 enable_review_labels_effort = false
 require_security_review = false
@@ -670,6 +672,7 @@ committable_code_suggestions = true
 commitable_code_suggestions = true
 # Dual publishing posts suggestions inline through the same path, so it is denied per directory too.
 dual_publishing_score_threshold = 1
+output_style = "coderabbit"
 num_code_suggestions_per_chunk = 2
 max_number_of_calls = 99
 parallel_calls = true
@@ -723,6 +726,8 @@ dual_publishing_score_threshold = 7
         assert get_settings().pr_description.publish_description_as_comment is False
         assert get_settings().pr_description.publish_description_as_comment_persistent is True
         assert get_settings().pr_reviewer.inline_key_issues is False
+        assert get_settings().pr_reviewer.output_style == ""
+        assert get_settings().pr_code_suggestions.output_style == ""
         assert get_settings().pr_reviewer.enable_review_labels_security is True
         assert get_settings().pr_reviewer.enable_review_labels_effort is True
         assert get_settings().pr_reviewer.require_security_review is True

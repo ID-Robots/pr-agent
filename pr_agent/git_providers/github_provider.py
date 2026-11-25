@@ -1310,6 +1310,39 @@ class GithubProvider(GitProvider):
                 get_logger().error(f"Failed to publish inline code comments fallback, error: {e}")
                 raise
 
+    def publish_review_with_body(self, comments: list[dict], build_body) -> list[int]:
+        """Post ONE pull-request review that carries a summary body and inline comments.
+
+        ``comments`` are code-suggestion dicts (body, relevant_file, relevant_lines_start,
+        relevant_lines_end); ``build_body(rejected)`` returns the review body for the indices of
+        the comments that are not posted inline. The review is a single create_review call. When
+        GitHub rejects the batch with a 422, each comment is checked on its own and the review is
+        posted once more with the accepted comments and a body built for the rejected ones.
+        Returns the indices of the rejected comments.
+        """
+        payloads = []
+        for comment in comments:
+            payload = self._build_code_suggestion_payload(comment)
+            payload.pop("_dedup_code_fp", None)
+            payloads.append(payload)
+        rejected = []
+        try:
+            body = self.limit_output_characters(build_body(rejected), self.max_comment_chars)
+            self.pr.create_review(commit=self.last_commit_id, body=body, event="COMMENT", comments=payloads)
+        except GithubException as e:
+            if getattr(e, "status", None) != 422 or not payloads:
+                raise
+            get_logger().info("GitHub rejected the review comments; checking each comment on its own")
+            invalid = {id(comment) for comment, _ in self._verify_code_comments(payloads)[1]}
+            rejected = [index for index, payload in enumerate(payloads) if id(payload) in invalid]
+            if not rejected:
+                raise  # no comment is at fault, so the same review would be rejected again
+            payloads = [payload for payload in payloads if id(payload) not in invalid]
+            body = self.limit_output_characters(build_body(rejected), self.max_comment_chars)
+            self.pr.create_review(commit=self.last_commit_id, body=body, event="COMMENT", comments=payloads)
+        self._remember_published_inline_comment_bodies(payloads)
+        return rejected
+
     def get_review_thread_comments(self, comment_id: int) -> list[dict]:
         """
         Retrieves all comments in the same thread as the given comment.

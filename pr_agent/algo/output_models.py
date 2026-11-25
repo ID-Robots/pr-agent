@@ -6,6 +6,15 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator
 
 
+def _optional_text(value):
+    """Keep a string, turn a number into its text and anything else into None (a missing value)."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
 class SubPR(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -21,6 +30,12 @@ class KeyIssuesComponentLink(BaseModel):
     issue_content: str
     start_line: int
     end_line: int
+    # Asked for only by the coderabbit output style; a missing value falls back to a default.
+    issue_title: str | None = None
+    severity: str | None = None
+    effort: str | None = None
+
+    _layout_text = field_validator("issue_title", "severity", "effort", mode="before")(_optional_text)
 
 
 class TodoSection(BaseModel):
@@ -113,6 +128,11 @@ class CodeSuggestion(BaseModel):
     improved_code: str
     one_sentence_summary: str
     label: str
+    # Asked for only by the coderabbit output style; a missing value falls back to a default.
+    suggestion_title: str | None = None
+    effort: str | None = None
+
+    _layout_text = field_validator("suggestion_title", "effort", mode="before")(_optional_text)
 
 
 class PRCodeSuggestions(BaseModel):
