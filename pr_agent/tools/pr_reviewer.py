@@ -1735,7 +1735,9 @@ class PRReviewer:
             return
         info = coderabbit_style.review_info(self.git_provider, getattr(self, "incremental", None),
                                             get_run_details(), get_settings().config.get("model", ""),
-                                            getattr(self, "remaining_files_list", None), skipped)
+                                            getattr(self, "remaining_files_list", None), skipped,
+                                            getattr(self, "partial_files_list", None),
+                                            getattr(self, "review_failed_chunk_count", 0))
         max_chars = getattr(self.git_provider, "max_comment_chars", None)
 
         def build_body(rejected: list[int]) -> str:

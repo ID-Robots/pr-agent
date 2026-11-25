@@ -53,7 +53,7 @@ The body of the pull-request review contains:
    - comments GitHub rejects (HTTP 422) are also moved to the body, and the review is posted again with the rest.
 3. A collapsed `🤖 Prompt to fix all issues` section that lists every finding of the review by file and line, inline and outside the diff alike.
 4. For `/improve`, the suggestions coverage note when there is one (`pr_code_suggestions.enable_suggestions_coverage_footer`).
-5. A collapsed `ℹ️ Review info` section: the model, the commit range (`base..head`, or the new commits only for an incremental review), the number of findings that were already posted on the PR and were not repeated, the files reviewed, and the files left out because of the token budget.
+5. A collapsed `ℹ️ Review info` section: the model, the commit range (`base..head`, or the new commits only for an incremental review), the number of findings that were already posted on the PR and were not repeated, the files reviewed, the files reviewed only in part (patch clipped), the files left out because of the token budget, and a warning when part of the diff failed and is not covered.
 
 ### Hidden markers
 
@@ -253,6 +253,7 @@ The environment-variable forms are `PR_REVIEWER.OUTPUT_STYLE`, `PR_CODE_SUGGESTI
 - **GitHub only.** Other providers ignore the setting and keep the default output.
 - **No PR Reviewer Guide comment** (unless `keep_review_guide_comment = true`). Its review-level sections (effort estimate, security concerns, tests, ticket compliance) are not posted. Review labels are still applied when they are enabled.
 - **No persistent finding state.** That state lives in the PR Reviewer Guide comment, so `persistent_finding_state` and the earlier-findings context (`max_previous_findings_chars`) are not used in this mode unless the guide comment is kept. Findings already on the PR are still not posted twice: the dedup markers skip a finding with the same text, and a finding is also skipped while an earlier finding comment of this mode still sits on the same file and overlapping lines (the model rarely words a finding the same way twice). A comment GitHub marks outdated no longer blocks a new finding there. Skipped findings are counted under "Review info".
+- **No incremental baseline.** `/review -i` finds its previous review through the PR Reviewer Guide comment, so in this mode it reviews the whole pull request again unless the guide comment is kept (`keep_review_guide_comment = true`).
 - **`/describe` is unchanged.**
 - **One review per run.** `/review` and `/improve` each post one new pull-request review per run. Earlier reviews are not edited or resolved.
 - **Empty runs.** When there is nothing new to post, the tool posts a review that says `Actionable comments posted: 0`, unless that tool's `publish_output_no_suggestions` is `false`.
@@ -309,7 +310,9 @@ Use a new `<n>` for every release. A tag that is moved and pushed again rebuilds
 
    ```sh
    uv sync
-   uv run python scripts/generate_config_reference.py   # rewrites docs/docs/usage-guide/configuration_reference.md
+   uv run python scripts/generate_config_reference.py /tmp/configuration_reference.md   # write to a temporary path
+   diff /tmp/configuration_reference.md docs/docs/usage-guide/configuration_reference.md   # inspect, then replace the page
+   cp /tmp/configuration_reference.md docs/docs/usage-guide/configuration_reference.md
    PYTHONPATH=. uv run pytest tests/unittest -q
    uv run ruff check pr_agent/algo/coderabbit_style.py pr_agent/tools/pr_reviewer.py pr_agent/tools/pr_code_suggestions.py
    uvx pre-commit run --files $(git diff --name-only main)

@@ -554,7 +554,8 @@ def _file_list(title: str, files) -> list[str]:
 
 
 def render_review_info(model: str = "", commit_range: str = "", files: list[str] | None = None,
-                       files_not_reviewed: list[str] | None = None, skipped: int = 0) -> str:
+                       files_not_reviewed: list[str] | None = None, skipped: int = 0,
+                       files_partially_reviewed: list[str] | None = None, failed_chunks: int = 0) -> str:
     lines = []
     if model:
         lines.append(f"- **Model:** `{_one_line(model).replace('`', '')}`")
@@ -562,7 +563,11 @@ def render_review_info(model: str = "", commit_range: str = "", files: list[str]
         lines.append(f"- **Commit range:** `{_one_line(commit_range).replace('`', '')}`")
     if skipped:
         lines.append(f"- **Already posted, not repeated:** {skipped} finding(s)")
+    if failed_chunks:
+        lines.append(f"- ⚠️ **Incomplete review:** {failed_chunks} part(s) of the diff failed and are not covered")
     lines.extend(_file_list("Files reviewed", files))
+    lines.extend(_file_list("Files reviewed in part (patch clipped to fit the token budget)",
+                            files_partially_reviewed))
     lines.extend(_file_list("Files not reviewed (token budget)", files_not_reviewed))
     body = "\n".join(lines) or "- No review details available."
     return f"<details>\n<summary>ℹ️ Review info</summary>\n\n{body}\n\n</details>"
@@ -614,7 +619,7 @@ def commit_range(base_sha, head_sha, incremental=None) -> str:
 
 
 def review_info(git_provider, incremental, run_details, default_model: str = "", files_not_reviewed=None,
-                skipped: int = 0) -> dict:
+                skipped: int = 0, files_partially_reviewed=None, failed_chunks: int = 0) -> dict:
     """Collect the ``render_review_info`` arguments from what the run has already loaded.
 
     Reads only attributes and the cached diff files of the provider; it makes no API call of its own.
@@ -630,5 +635,8 @@ def review_info(git_provider, incremental, run_details, default_model: str = "",
         name = (getattr(file, "filename", "") or "").strip()
         if name and name not in not_reviewed and name not in files:
             files.append(name)
+    partial = [name for name in (files_partially_reviewed or []) if isinstance(name, str)]
     return {"model": str(model or ""), "commit_range": commit_range(base_sha, head_sha, incremental),
-            "files": files, "files_not_reviewed": not_reviewed, "skipped": skipped}
+            "files": files, "files_not_reviewed": not_reviewed, "skipped": skipped,
+            "files_partially_reviewed": partial,
+            "failed_chunks": failed_chunks if isinstance(failed_chunks, int) and failed_chunks > 0 else 0}

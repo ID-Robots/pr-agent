@@ -313,6 +313,25 @@ def test_review_body_respects_the_size_limit():
     assert "Outside diff range comments" in body and "Prompt to fix all issues" not in body
 
 
+def test_review_info_discloses_incomplete_coverage():
+    info = cs.render_review_info(model="m", files=["a.py"], files_partially_reviewed=["big.py"], failed_chunks=2)
+    assert "**Incomplete review:** 2 part(s) of the diff failed and are not covered" in info
+    assert "Files reviewed in part (patch clipped to fit the token budget) (1)" in info and "`big.py`" in info
+    assert "Incomplete review" not in cs.render_review_info(model="m", files=["a.py"])
+
+
+def test_review_passes_partial_coverage_to_the_review_body(coderabbit):
+    provider = _github()
+    reviewer = _reviewer(provider)
+    reviewer.partial_files_list = ["big.py"]
+    reviewer.review_failed_chunk_count = 1
+
+    reviewer._publish_key_issues_as_inline_comments({"review": {"key_issues_to_review": [_key_issue()]}})
+
+    body = provider.pr.create_review.call_args.kwargs["body"]
+    assert "**Incomplete review:** 1 part(s)" in body and "`big.py`" in body
+
+
 def test_commit_range_for_full_and_incremental_reviews():
     assert cs.commit_range("base", "head") == "base..head"
     incremental = SimpleNamespace(is_incremental=True, last_seen_commit_sha="seen", first_new_commit_sha="new")
