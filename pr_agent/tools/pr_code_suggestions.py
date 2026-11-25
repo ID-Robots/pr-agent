@@ -8,6 +8,7 @@ import traceback
 from datetime import datetime
 from functools import partial
 
+from pr_agent.algo import coderabbit_style
 from pr_agent.algo.ai_handlers.base_ai_handler import BaseAiHandler
 from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
 from pr_agent.algo.artifacts import get_artifact_context, prompt_boundary_markers
@@ -23,6 +24,12 @@ from pr_agent.algo.comment_identity import (
 )
 from pr_agent.algo.git_patch_processing import decouple_and_convert_to_hunks_with_lines_numbers, split_diff_lines
 from pr_agent.algo.i18n import t
+from pr_agent.algo.inline_comment_dedup import (
+    body_fingerprint,
+    body_with_markers,
+    code_fingerprint,
+    get_inline_comment_store,
+)
 from pr_agent.algo.pr_processing import (
     DELETED_FILES_,
     OUTPUT_BUFFER_TOKENS_HARD_THRESHOLD,
@@ -47,7 +54,7 @@ from pr_agent.algo.run_details import (
     record_model_used,
 )
 from pr_agent.algo.run_output import push_outputs_async, show_relevant_configurations, show_run_details
-from pr_agent.algo.setting_utils import normalize_setting_list
+from pr_agent.algo.setting_utils import _as_bool_setting, normalize_setting_list
 from pr_agent.algo.skills_loader import get_skills_context
 from pr_agent.algo.token_budget import AttemptTokenBudget, FittedPrompt
 from pr_agent.algo.token_handler import TokenHandler
@@ -341,6 +348,7 @@ class PRCodeSuggestions:
             "focus_only_on_problems": get_settings().get("pr_code_suggestions.focus_only_on_problems", False),
             "date": datetime.now().strftime('%Y-%m-%d'),
             'duplicate_prompt_examples': get_settings().config.get('duplicate_prompt_examples', False),
+            "coderabbit_style": self._coderabbit_style_enabled(),
         }
 
         if get_settings().pr_code_suggestions.get("decouple_hunks", True):
@@ -722,6 +730,12 @@ class PRCodeSuggestions:
             if self.git_provider.supports_code_suggestions_artifact() is True:
                 self.git_provider.publish_code_suggestions_artifact(
                     [], artifact_footer=coverage_footer, no_suggestions_message=no_suggestions_message)
+                return
+            if self._coderabbit_style_enabled() and self._publish_coderabbit_suggestions(
+                    [], [], [], coverage_footer):
+                if self.progress_response:
+                    self.git_provider.remove_comment(self.progress_response)
+                    self.progress_response = None
                 return
             pr_body = add_comment_identity(
                 pr_body,
@@ -1285,7 +1299,7 @@ class PRCodeSuggestions:
                             f"edited improved suggestion {i + 1}, because equal to existing code: "
                             f"{suggestion['existing_code']}"
                         )
-                        if get_committable_code_suggestions():
+                        if get_committable_code_suggestions() or self._coderabbit_style_enabled():
                             suggestion['improved_code'] = ""  # we need 'existing_code' to locate the code in the PR
                         else:
                             suggestion['existing_code'] = ""
@@ -1390,7 +1404,8 @@ class PRCodeSuggestions:
 
     def _prepare_pr_code_suggestions(self, predictions: str) -> dict:
         data = load_yaml(predictions.strip(),
-                         keys_fix_yaml=["relevant_file", "suggestion_content", "existing_code", "improved_code"],
+                         keys_fix_yaml=["relevant_file", "suggestion_content", "existing_code", "improved_code",
+                                        "suggestion_title"],
                          first_key="code_suggestions", last_key="label")
         if isinstance(data, list):
             data = {'code_suggestions': data}
@@ -1471,7 +1486,14 @@ class PRCodeSuggestions:
         return not get_settings().config.publish_output or (
             not get_committable_code_suggestions()
             and self.git_provider.is_supported("gfm_markdown")
+            and not self._coderabbit_style_enabled()
         )
+
+    def _coderabbit_style_enabled(self) -> bool:
+        settings = get_settings()
+        return coderabbit_style.is_coderabbit_style(settings.pr_code_suggestions.get("output_style", ""),
+                                                    settings.config.get("output_style", ""),
+                                                    getattr(self, "git_provider", None))
 
     def _limit_suggestions_per_file(self, suggestions: list[dict]) -> list[dict]:
         raw_limit = get_settings().get("pr_code_suggestions.max_suggestions_per_file", 0)
@@ -1523,6 +1545,8 @@ class PRCodeSuggestions:
         artifact_batch_published = False
         coverage_footer = self._get_suggestions_coverage_footer() if include_coverage_footer else ""
         supports_suggestions_artifact = self.git_provider.supports_code_suggestions_artifact() is True
+        coderabbit = self._coderabbit_style_enabled()
+        coderabbit_items = []
 
         if not data['code_suggestions']:
             get_logger().info('No suggestions found to improve this PR.')
@@ -1598,6 +1622,9 @@ class PRCodeSuggestions:
                                    'relevant_lines_start': relevant_lines_start,
                                    'relevant_lines_end': relevant_lines_end,
                                    'original_suggestion': d}
+            if coderabbit:
+                coderabbit_items.append((rendered_suggestion, bool(new_code_snippet and is_applicable),
+                                         fallback_reason, has_valid_anchor and not requires_pr_fallback))
             if supports_suggestions_artifact:
                 artifact_suggestions.append(rendered_suggestion)
 
@@ -1607,6 +1634,12 @@ class PRCodeSuggestions:
                                          f"{relevant_lines_start}-{relevant_lines_end}`")
             else:
                 code_suggestions.append(rendered_suggestion)
+
+        if coderabbit:
+            if self._push_coderabbit_suggestions(coderabbit_items, coverage_footer):
+                self._output_published = True
+                return
+            get_logger().warning("Falling back to publishing the code suggestions as separate inline comments")
 
         suggestions_to_publish = artifact_suggestions if supports_suggestions_artifact else code_suggestions
         if suggestions_to_publish:
@@ -1671,6 +1704,70 @@ class PRCodeSuggestions:
                 # surfacing the exhausted retries to the operator.
                 raise RuntimeError("Failed to publish code suggestions after individual retries")
         return
+
+    def _push_coderabbit_suggestions(self, items: list, coverage_footer: str = "") -> bool:
+        """Publish the suggestions as ONE pull-request review in the coderabbit output style.
+
+        ``items`` hold (rendered suggestion, committable, reason it is not committable, anchorable).
+        Suggestions already posted on the PR are skipped by their dedup fingerprints, which are taken
+        from the plain suggestion body so they stay stable across runs. Returns False when the review
+        could not be posted, so the caller can fall back to the regular inline comments.
+        """
+        store = get_inline_comment_store(self.git_provider)
+        store.load()  # a failed load leaves within-run dedup only
+        max_chars = getattr(self.git_provider, "max_comment_chars", None)
+        comments, posted, outside, seen, skipped = [], [], [], set(), 0
+        for rendered, committable, reason, anchorable in items:
+            path = rendered["relevant_file"]
+            suggestion = rendered["original_suggestion"]
+            start, end = rendered["relevant_lines_start"], rendered["relevant_lines_end"]
+            diff_file = self._get_diff_file(path) if anchorable else None
+            anchor = coderabbit_style.anchor_in_hunks(getattr(diff_file, "patch", ""), start, end) \
+                if diff_file is not None else None
+            if anchor is None:
+                outside.append(coderabbit_style.finding_from_code_suggestion(suggestion, path, start, end))
+                continue
+            if anchor != (start, end):
+                committable, reason = False, reason or "the suggested lines are not all part of the diff"
+            body_fp = body_fingerprint(path, None, rendered["body"])
+            code_fp = code_fingerprint(path, None, rendered["body"])
+            if any(fp and (store.seen(fp) or fp in seen) for fp in (body_fp, code_fp)):
+                skipped += 1
+                continue
+            seen.update(fp for fp in (body_fp, code_fp) if fp)
+            finding = coderabbit_style.finding_from_code_suggestion(
+                suggestion, path, anchor[0], anchor[1], committable, reason)
+            body = coderabbit_style.render_inline_body(finding, max_chars and max_chars - 200)
+            comments.append({"body": body_with_markers(body, body_fp, code_fp, max_chars, self.git_provider),
+                             "relevant_file": path, "relevant_lines_start": anchor[0],
+                             "relevant_lines_end": anchor[1]})
+            posted.append(finding)
+        return self._publish_coderabbit_suggestions(comments, posted, outside, coverage_footer, skipped)
+
+    def _publish_coderabbit_suggestions(self, comments: list[dict], posted: list, outside: list,
+                                        coverage_footer: str = "", skipped: int = 0) -> bool:
+        """Post ONE pull-request review holding the inline comments and the summary body."""
+        if not comments and not outside and not _as_bool_setting(
+                get_settings().pr_code_suggestions.get("publish_output_no_suggestions", True)):
+            get_logger().info("No new code suggestions to post")
+            return True
+        info = coderabbit_style.review_info(self.git_provider, getattr(self, "incremental", None),
+                                            get_run_details(), get_settings().config.get("model", ""),
+                                            getattr(self, "remaining_files_list", None), skipped)
+        max_chars = getattr(self.git_provider, "max_comment_chars", None)
+
+        def build_body(rejected: list[int]) -> str:
+            return coderabbit_style.render_review_body(
+                [finding for index, finding in enumerate(posted) if index not in rejected],
+                outside + [finding for index, finding in enumerate(posted) if index in rejected],
+                info, footer=coverage_footer, max_chars=max_chars)
+
+        try:
+            self.git_provider.publish_review_with_body(comments, build_body)
+        except Exception as e:
+            get_logger().warning(f"Failed to publish the code suggestions as one review, error: {e}")
+            return False
+        return True
 
     def _get_diff_file(self, relevant_file):
         diff_files = getattr(self.git_provider, "diff_files", None)

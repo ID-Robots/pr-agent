@@ -102,6 +102,7 @@ See [Configuration options](../usage-guide/configuration_options.md#global-confi
 | `output_relevant_configurations` | false |  |
 | `output_run_details` | false | if true, append an agent run details section (model, tokens, time cost, AI calls) to generated PR comments |
 | `output_run_cost` | false | if true, collect estimated LiteLLM API cost and include it inside the enabled run details section |
+| `output_style` | "" | "" (default layout) or "coderabbit": on GitHub, /review and /improve post one review of inline findings |
 | `large_patch_policy` | "clip" | "clip" (default) or "skip"; a missing value is treated as "clip" |
 | `duplicate_prompt_examples` | false |  |
 | `persistent_inline_comments` | false | Enable persistent inline comments (issue #2037) to fingerprint each inline comment and embed a provider-compatible marker, then skip re-posting suggestions already present on the PR/MR across runs. |
@@ -182,6 +183,8 @@ See [Review](../tools/review.md#configuration-options).
 | `persistent_finding_state` | true | Persist review finding state across complete review runs. |
 | `max_previous_findings_chars` | 8000 | Character budget for the findings stored by earlier reviews, given to /review as context so it keeps their wording instead of re-raising them reworded, and skips findings whose GitHub or GitLab inline thread someone other than PR-Agent resolved (needs persistent_finding_state); 0 disables it. |
 | `inline_key_issues` | false | Publish each review finding as an inline comment where the provider can verify inline-comment publication (GitHub, Bitbucket Cloud, Azure DevOps, GitLab, Gitea). |
+| `output_style` | "" | overrides config.output_style for /review when non-empty: "" (default layout) or "coderabbit" |
+| `keep_review_guide_comment` | false | with output_style "coderabbit", also post the persistent PR Reviewer Guide comment |
 | `extra_instructions` | "" |  |
 | `num_max_findings` | 3 |  |
 | `final_update_message` | true |  |
@@ -276,6 +279,7 @@ See [Improve](../tools/improve.mdx#configuration-options).
 | Key | Default | Description |
 | --- | --- | --- |
 | `committable_code_suggestions` | false | Deprecated alias still accepted until 1.0: pr_code_suggestions.commitable_code_suggestions |
+| `output_style` | "" | overrides config.output_style for /improve when non-empty: "" (default layout) or "coderabbit" |
 | `dual_publishing_score_threshold` | -1 | Not settable from a per-directory .pr_agent.toml. -1 or 0 disables, [1-10] also publishes suggestions scoring >= it as committable, besides the table. |
 | `focus_only_on_problems` | true |  |
 | `extra_instructions` | "" |  |
