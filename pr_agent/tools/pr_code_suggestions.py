@@ -1722,6 +1722,7 @@ class PRCodeSuggestions:
         store.load()  # a failed load leaves within-run dedup only
         max_chars = getattr(self.git_provider, "max_comment_chars", None)
         comments, posted, outside, seen, skipped = [], [], [], set(), 0
+        existing_findings = coderabbit_style.existing_finding_ranges(self.git_provider)
         for rendered, committable, reason, anchorable in items:
             path = rendered["relevant_file"]
             suggestion = rendered["original_suggestion"]
@@ -1736,7 +1737,8 @@ class PRCodeSuggestions:
                 committable, reason = False, reason or "the suggested lines are not all part of the diff"
             body_fp = body_fingerprint(path, None, rendered["body"])
             code_fp = code_fingerprint(path, None, rendered["body"])
-            if any(fp and (store.seen(fp) or fp in seen) for fp in (body_fp, code_fp)):
+            if any(fp and (store.seen(fp) or fp in seen) for fp in (body_fp, code_fp)) or \
+                    coderabbit_style.overlaps_existing_finding(existing_findings, path, anchor[0], anchor[1]):
                 skipped += 1
                 continue
             seen.update(fp for fp in (body_fp, code_fp) if fp)

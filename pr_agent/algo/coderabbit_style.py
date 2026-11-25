@@ -23,7 +23,12 @@ Mapping rules (unknown, missing or garbled values never drop a finding, they fal
   otherwise "General".
 - Effort: "Quick win", "Moderate" or "Larger change" (a few synonyms accepted); otherwise "Moderate".
 
-The functions here only read their arguments and never call a provider API; ``review_info`` reads the
+A finding is not posted again while an earlier finding comment of this layout still sits on the same
+file and overlapping lines (the model rarely words a finding the same way twice, so the text
+fingerprints alone do not stop repeats). A comment GitHub marks outdated no longer counts.
+
+The functions here only read their arguments and never call a provider API, except
+``existing_finding_ranges``, which lists the pull request's review comments; ``review_info`` reads the
 provider attributes and cached diff files the run has already loaded.
 """
 
@@ -35,6 +40,7 @@ import re
 from dataclasses import dataclass
 
 OUTPUT_STYLE_CODERABBIT = "coderabbit"
+_FINDING_MARKER_PREFIX = "<!-- pr-agent:finding v1 "
 REVIEW_METHOD = "publish_review_with_body"
 
 SEVERITIES = ("Critical", "Major", "Minor", "Trivial")
@@ -382,7 +388,32 @@ def anchor_in_hunks(patch, start_line: int, end_line: int,
 # --- rendering --------------------------------------------------------------------------------------
 
 def finding_marker(finding: Finding) -> str:
-    return f"<!-- pr-agent:finding v1 severity={slug(finding.severity)} category={slug(finding.category)} -->"
+    return f"{_FINDING_MARKER_PREFIX}severity={slug(finding.severity)} category={slug(finding.category)} -->"
+
+
+def existing_finding_ranges(git_provider) -> dict[str, list[tuple[int, int]]]:
+    """Lines that already carry a finding comment of this layout, per file.
+
+    A comment GitHub marks outdated has no current line and is left out, so changed code can be
+    reported again. When the comments cannot be listed, no ranges are returned.
+    """
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    try:
+        comments = list(git_provider.pr.get_comments())
+    except Exception:
+        return ranges
+    for comment in comments:
+        body, path = getattr(comment, "body", None), getattr(comment, "path", None)
+        end = _as_line(getattr(comment, "line", None))
+        if not isinstance(body, str) or _FINDING_MARKER_PREFIX not in body or not isinstance(path, str) or not end:
+            continue
+        start = _as_line(getattr(comment, "start_line", None)) or end
+        ranges.setdefault(path, []).append((min(start, end), max(start, end)))
+    return ranges
+
+
+def overlaps_existing_finding(ranges: dict, path: str, start_line: int, end_line: int) -> bool:
+    return any(start <= end_line and start_line <= end for start, end in ranges.get(path, ()))
 
 
 def _headline(finding: Finding) -> str:

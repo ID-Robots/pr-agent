@@ -1615,6 +1615,7 @@ class PRReviewer:
         candidate_issues = {}
         candidate_fingerprints = {}
         published = 0
+        existing_findings = coderabbit_style.existing_finding_ranges(self.git_provider) if coderabbit else {}
         for issue in issues:
             try:
                 comment = self._build_key_issue_comment(issue, diff_files)
@@ -1622,7 +1623,9 @@ class PRReviewer:
                     remaining_issues.append(issue)
                     continue
                 fingerprint = key_issue_fingerprint(comment["relevant_file"], comment["body"])
-                if store.seen(fingerprint):
+                if store.seen(fingerprint) or coderabbit_style.overlaps_existing_finding(
+                        existing_findings, comment["relevant_file"], comment["relevant_lines_start"],
+                        comment["relevant_lines_end"]):
                     published += 1
                     continue
                 location_fingerprint = key_issue_location_fingerprint(

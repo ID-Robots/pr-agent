@@ -457,6 +457,59 @@ def test_review_finding_rejected_with_422_moves_to_the_body(coderabbit, monkeypa
     assert result["review"]["key_issues_to_review"] == [issues[1]]
 
 
+_OLD_FINDING = "**Major** · **Possible Bug** · **Moderate**\n\n**Worded differently before.**\n\n" \
+               "<!-- pr-agent:finding v1 severity=major category=possible-bug -->"
+
+
+def _existing_comment(path="app.js", line=2, start_line=None, body=_OLD_FINDING):
+    return SimpleNamespace(body=body, path=path, line=line, start_line=start_line)
+
+
+def test_existing_finding_ranges_keep_only_current_finding_comments():
+    provider = _github()
+    provider.pr.get_comments.return_value = [
+        _existing_comment(line=3, start_line=2),
+        _existing_comment(line=9),
+        _existing_comment(line=None),                       # outdated: GitHub reports no current line
+        _existing_comment(path="lib.js", line=5, body="A reply without the marker"),
+        _existing_comment(path=None, line=7),
+    ]
+    ranges = cs.existing_finding_ranges(provider)
+    assert ranges == {"app.js": [(2, 3), (9, 9)]}
+    assert cs.overlaps_existing_finding(ranges, "app.js", 3, 6)
+    assert cs.overlaps_existing_finding(ranges, "app.js", 9, 9)
+    assert not cs.overlaps_existing_finding(ranges, "app.js", 4, 8)
+    assert not cs.overlaps_existing_finding(ranges, "lib.js", 2, 3)
+
+    provider.pr.get_comments.side_effect = RuntimeError("boom")
+    assert cs.existing_finding_ranges(provider) == {}
+
+
+def test_review_finding_reworded_on_the_same_lines_is_not_posted_again(coderabbit):
+    provider = _github()
+    provider.pr.get_comments.return_value = [_existing_comment(line=3, start_line=2)]
+    reviewer = _reviewer(provider)
+    issues = [_key_issue(issue_title="Same defect, new words.", issue_content="The lock is kept on the new branch."),
+              _key_issue(start_line=4, end_line=4, issue_title="Another one.", issue_content="Second finding.")]
+
+    reviewer._publish_key_issues_as_inline_comments({"review": {"key_issues_to_review": issues}})
+
+    kwargs = provider.pr.create_review.call_args.kwargs
+    assert [comment["line"] for comment in kwargs["comments"]] == [4]
+    assert kwargs["body"].startswith("**Actionable comments posted: 1**")
+    assert "Already posted, not repeated:** 1" in kwargs["body"]
+
+
+def test_review_finding_is_posted_again_once_the_old_comment_is_outdated(coderabbit):
+    provider = _github()
+    provider.pr.get_comments.return_value = [_existing_comment(line=None)]
+    reviewer = _reviewer(provider)
+
+    reviewer._publish_key_issues_as_inline_comments({"review": {"key_issues_to_review": [_key_issue()]}})
+
+    assert len(provider.pr.create_review.call_args.kwargs["comments"]) == 1
+
+
 def test_review_findings_are_not_posted_again_on_a_second_run(coderabbit):
     first_provider = _github()
     _reviewer(first_provider)._publish_key_issues_as_inline_comments(
@@ -646,6 +699,18 @@ async def test_improve_suggestions_are_not_posted_again_on_a_second_run(coderabb
     kwargs = second_provider.pr.create_review.call_args.kwargs
     assert kwargs["comments"] == []
     assert kwargs["body"].startswith("**Actionable comments posted: 0**")
+    assert "Already posted, not repeated:** 1" in kwargs["body"]
+
+
+@pytest.mark.asyncio
+async def test_improve_suggestion_reworded_on_the_same_lines_is_not_posted_again(coderabbit):
+    provider = _github()
+    provider.pr.get_comments.return_value = [_existing_comment(line=2)]
+
+    await _improver(provider).push_inline_code_suggestions({"code_suggestions": [_code_suggestion()]})
+
+    kwargs = provider.pr.create_review.call_args.kwargs
+    assert kwargs["comments"] == []
     assert "Already posted, not repeated:** 1" in kwargs["body"]
 
 
