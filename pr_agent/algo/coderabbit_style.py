@@ -600,7 +600,9 @@ def render_review_body(posted: list[Finding], outside: list[Finding], info: dict
         # outside-diff findings from the last one.
         while len(body := build(True)) > max_chars and (optional or shown):
             optional.pop() if optional else shown.pop()
-        body = body[:max_chars]
+        if len(body) > max_chars:
+            # Even the review info does not fit: keep the headline and the note only.
+            body = f"{headline}\n\n_(review body truncated)_"[:max_chars]
     return body
 
 
@@ -630,12 +632,12 @@ def review_info(git_provider, incremental, run_details, default_model: str = "",
     head_getter = getattr(git_provider, "get_pr_head_sha", None)
     head_sha = head_getter() if callable(head_getter) else ""
     not_reviewed = [name for name in (files_not_reviewed or []) if isinstance(name, str)]
+    partial = [name for name in (files_partially_reviewed or []) if isinstance(name, str)]
     files = []
     for file in getattr(git_provider, "diff_files", None) or git_provider.get_diff_files() or []:
         name = (getattr(file, "filename", "") or "").strip()
-        if name and name not in not_reviewed and name not in files:
+        if name and name not in not_reviewed and name not in partial and name not in files:
             files.append(name)
-    partial = [name for name in (files_partially_reviewed or []) if isinstance(name, str)]
     return {"model": str(model or ""), "commit_range": commit_range(base_sha, head_sha, incremental),
             "files": files, "files_not_reviewed": not_reviewed, "skipped": skipped,
             "files_partially_reviewed": partial,

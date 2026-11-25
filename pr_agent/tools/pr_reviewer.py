@@ -1728,7 +1728,8 @@ class PRReviewer:
         posted = [self._coderabbit_finding(issue, comment)
                   for issue, comment in zip(comment_issues, comments, strict=True)]
         outside = [coderabbit_style.finding_from_review_issue(issue) for issue in outside_issues]
-        if not posted and not outside and not _as_bool(
+        # A run with failed parts is always posted: its review body carries the incomplete-coverage warning.
+        if not posted and not outside and not getattr(self, "review_failed_chunk_count", 0) and not _as_bool(
                 get_settings().pr_reviewer.get("publish_output_no_suggestions", True)):
             get_logger().info("No new review findings to post")
             self._coderabbit_review_handled = True

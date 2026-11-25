@@ -306,12 +306,17 @@ Use a new `<n>` for every release. A tag that is moved and pushed again rebuilds
 
    These files are fork-only and normally merge cleanly: `pr_agent/algo/coderabbit_style.py`, `tests/unittest/test_coderabbit_style.py`, `.github/workflows/idr-ghcr-github-action.yml` and this page.
 
-3. Regenerate the configuration reference and re-run the checks:
+3. Regenerate the configuration reference to a temporary path and compare it with the page:
 
    ```sh
    uv sync
-   uv run python scripts/generate_config_reference.py /tmp/configuration_reference.md   # write to a temporary path
-   diff /tmp/configuration_reference.md docs/docs/usage-guide/configuration_reference.md   # inspect, then replace the page
+   uv run python scripts/generate_config_reference.py /tmp/configuration_reference.md
+   diff /tmp/configuration_reference.md docs/docs/usage-guide/configuration_reference.md
+   ```
+
+   Read the diff. Only when it shows what you expect, replace the page and re-run the checks:
+
+   ```sh
    cp /tmp/configuration_reference.md docs/docs/usage-guide/configuration_reference.md
    PYTHONPATH=. uv run pytest tests/unittest -q
    uv run ruff check pr_agent/algo/coderabbit_style.py pr_agent/tools/pr_reviewer.py pr_agent/tools/pr_code_suggestions.py

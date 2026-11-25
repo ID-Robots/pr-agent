@@ -313,6 +313,33 @@ def test_review_body_respects_the_size_limit():
     assert "Outside diff range comments" in body and "Prompt to fix all issues" not in body
 
 
+def test_review_body_keeps_only_the_headline_when_even_the_review_info_does_not_fit():
+    body = cs.render_review_body([_finding()], [], {"model": "m" * 500}, max_chars=200)
+    assert body == "**Actionable comments posted: 1**\n\n_(review body truncated)_"
+    assert "<details>" not in body
+
+
+def test_review_info_lists_a_partly_reviewed_file_only_once():
+    provider = _github(diff_files=[_diff_file("app.js"), _diff_file("big.js"), _diff_file("skipped.js")])
+    info = cs.review_info(provider, None, None, "m", ["skipped.js"], 0, ["big.js"], 1)
+    assert info["files"] == ["app.js"]
+    assert info["files_partially_reviewed"] == ["big.js"] and info["files_not_reviewed"] == ["skipped.js"]
+    assert info["failed_chunks"] == 1
+
+
+def test_review_with_failed_parts_is_posted_even_without_findings(coderabbit, settings):
+    settings.set("pr_reviewer.publish_output_no_suggestions", False)
+    provider = _github()
+    reviewer = _reviewer(provider)
+    reviewer.review_failed_chunk_count = 2
+
+    reviewer._publish_key_issues_as_inline_comments({"review": {"key_issues_to_review": []}})
+
+    body = provider.pr.create_review.call_args.kwargs["body"]
+    assert body.startswith("**Actionable comments posted: 0**")
+    assert "**Incomplete review:** 2 part(s)" in body
+
+
 def test_review_info_discloses_incomplete_coverage():
     info = cs.render_review_info(model="m", files=["a.py"], files_partially_reviewed=["big.py"], failed_chunks=2)
     assert "**Incomplete review:** 2 part(s) of the diff failed and are not covered" in info
