@@ -76,6 +76,7 @@ FROM base AS test
 # only as documentation that the unit suite keys off the bundled cost map.
 RUN uv sync --frozen --no-install-project --extra all
 COPY pr_agent pr_agent
+COPY tools tools
 COPY tests tests
 # Config the unit suite asserts against, copied file by file so an unrelated
 # workflow edit does not invalidate this layer.

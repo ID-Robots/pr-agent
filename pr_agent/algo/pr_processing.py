@@ -16,6 +16,7 @@ from pr_agent.algo.git_patch_processing import (
 from pr_agent.algo.language_handler import AUTO_GENERATED_FILES_EXACT, sort_files_by_main_languages
 from pr_agent.algo.model_routing import route_primary_model
 from pr_agent.algo.run_details import record_model_used
+from pr_agent.algo.setting_utils import _as_bool_setting
 from pr_agent.algo.token_budget import AttemptTokenBudget, FallbackEligibleError, clip_tokens
 from pr_agent.algo.token_handler import TokenHandler
 from pr_agent.algo.types import EDIT_TYPE
@@ -207,6 +208,16 @@ def cap_and_log_extra_lines(value, direction) -> int:
     return value
 
 
+def full_file_context_kwargs() -> dict:
+    """Diff-builder keywords for config.patch_full_file_context, which /review and /improve pass on.
+
+    Empty when the key is off, so the builders are called exactly as before.
+    """
+    if _as_bool_setting(get_settings().config.get("patch_full_file_context", False)):
+        return {"full_file_context": True}
+    return {}
+
+
 def get_pr_diff(git_provider: GitProvider, token_handler: TokenHandler,
                 model: str,
                 add_line_numbers_to_hunks: bool = False,
@@ -214,7 +225,8 @@ def get_pr_diff(git_provider: GitProvider, token_handler: TokenHandler,
                 large_pr_handling=False,
                 return_remaining_files=False,
                 return_prepared=False,
-                output_token_reserve: Callable[[str, int], int] | None = None):
+                output_token_reserve: Callable[[str, int], int] | None = None,
+                full_file_context: bool = False):
     budget = AttemptTokenBudget.for_attempt(
         model, token_handler, output_token_reserve=output_token_reserve
     )
@@ -228,6 +240,7 @@ def get_pr_diff(git_provider: GitProvider, token_handler: TokenHandler,
     if disable_extra_lines:
         PATCH_EXTRA_LINES_BEFORE = 0
         PATCH_EXTRA_LINES_AFTER = 0
+        full_file_context = False
     else:
         PATCH_EXTRA_LINES_BEFORE = get_settings().config.patch_extra_lines_before
         PATCH_EXTRA_LINES_AFTER = get_settings().config.patch_extra_lines_after
@@ -252,7 +265,8 @@ def get_pr_diff(git_provider: GitProvider, token_handler: TokenHandler,
         pr_languages, token_handler, add_line_numbers_to_hunks,
         patch_extra_lines_before=PATCH_EXTRA_LINES_BEFORE, patch_extra_lines_after=PATCH_EXTRA_LINES_AFTER,
         # Retain per-file counts when filtered-file metadata may force repacking.
-        skip_file_tokens_below=None if filtered_files else soft_token_budget)
+        skip_file_tokens_below=None if filtered_files else soft_token_budget,
+        full_file_context=full_file_context)
 
     # if we are under the limit, return the full diff
     if not patches_extended:
@@ -620,10 +634,12 @@ def pr_generate_extended_diff(pr_languages: list,
                               patch_extra_lines_before: int = 0,
                               patch_extra_lines_after: int = 0,
                               deleted_files: list | None = None,
-                              *, skip_file_tokens_below: int | None = None) -> tuple[list, int, list]:
+                              *, skip_file_tokens_below: int | None = None,
+                              full_file_context: bool = False) -> tuple[list, int, list]:
     """Render patches; optionally skip per-file counts below a diff-only token threshold.
 
     Leave file.tokens unchanged and return an empty per-patch count list when skipping.
+    `full_file_context` extends every patch over its whole base file instead of the extra-line counts.
     """
     total_tokens = token_handler.prompt_tokens  # initial tokens
     patches_extended = []
@@ -654,7 +670,7 @@ def pr_generate_extended_diff(pr_languages: list,
             # extend each patch with extra lines of context
             extended_patch = extend_patch(original_file_content_str, patch,
                                           patch_extra_lines_before, patch_extra_lines_after, file.filename,
-                                          new_file_str=new_file_content_str)
+                                          new_file_str=new_file_content_str, full_file_context=full_file_context)
             if not extended_patch:
                 get_logger().warning(f"Failed to extend patch for file: {file.filename}")
                 continue
@@ -953,7 +969,8 @@ def get_pr_multi_diffs(git_provider: GitProvider,
                        output_token_reserve: Callable[[str, int], int] | None = None,
                        include_filtered_file_names: bool = True,
                        deleted_files: list | None = None,
-                       *, return_coverage: bool = False):
+                       *, return_coverage: bool = False,
+                       full_file_context: bool = False):
     """
     Retrieves the diff files from a Git provider, sorts them by main language, and generates patches for each file.
     The patches are split into multiple groups based on the maximum number of tokens allowed for the given model.
@@ -971,6 +988,8 @@ def get_pr_multi_diffs(git_provider: GitProvider,
             patch was clipped. Takes precedence over `return_remaining_files`. Defaults to False.
         prepared_diff (PreparedPRDiff, optional): Reuse compressed file data prepared by a preceding
             `get_pr_diff` call for the same model attempt. Defaults to None.
+        full_file_context (bool, optional): Extend each patch of the full-diff fast path over its whole
+            base file; split diffs carry no extra lines either way. Defaults to False.
 
     Returns:
         List[str]: A list of final diff strings, split into multiple groups based on the maximum number
@@ -1053,7 +1072,8 @@ def get_pr_multi_diffs(git_provider: GitProvider,
         patch_extra_lines_before=PATCH_EXTRA_LINES_BEFORE,
         patch_extra_lines_after=PATCH_EXTRA_LINES_AFTER,
         deleted_files=deleted_files,
-        skip_file_tokens_below=soft_token_budget)
+        skip_file_tokens_below=soft_token_budget,
+        full_file_context=full_file_context)
 
     # if we are under the limit, return the full diff
     if total_tokens - token_handler.prompt_tokens < soft_token_budget:

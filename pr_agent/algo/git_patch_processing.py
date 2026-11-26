@@ -46,8 +46,11 @@ def to_hunk_only_patch(patch_str: str) -> str:
 
 
 def extend_patch(original_file_str, patch_str, patch_extra_lines_before=0,
-                 patch_extra_lines_after=0, filename: str = "", new_file_str="") -> str:
-    if not patch_str or (patch_extra_lines_before == 0 and patch_extra_lines_after == 0) or not original_file_str:
+                 patch_extra_lines_after=0, filename: str = "", new_file_str="",
+                 *, full_file_context: bool = False) -> str:
+    """Extend each hunk with unchanged lines; `full_file_context` extends them over the whole file."""
+    no_extra_lines = patch_extra_lines_before == 0 and patch_extra_lines_after == 0 and not full_file_context
+    if not patch_str or no_extra_lines or not original_file_str:
         return patch_str
 
     original_file_str = decode_if_bytes(original_file_str)
@@ -60,7 +63,8 @@ def extend_patch(original_file_str, patch_str, patch_extra_lines_before=0,
 
     try:
         extended_patch_str = process_patch_lines(patch_str, original_file_str,
-                                                 patch_extra_lines_before, patch_extra_lines_after, new_file_str)
+                                                 patch_extra_lines_before, patch_extra_lines_after, new_file_str,
+                                                 full_file_context=full_file_context)
     except Exception as e:
         get_logger().warning(f"Failed to extend patch: {e}", artifact={"traceback": traceback.format_exc()})
         return patch_str
@@ -90,12 +94,17 @@ def should_skip_patch(filename):
 
 
 def process_patch_lines(patch_str, original_file_str, patch_extra_lines_before, patch_extra_lines_after,
-                        new_file_str=""):
-    allow_dynamic_context = get_settings().config.allow_dynamic_context
+                        new_file_str="", *, full_file_context=False):
+    # Dynamic context would start the first hunk at its enclosing function, not at the top of the file.
+    allow_dynamic_context = get_settings().config.allow_dynamic_context and not full_file_context
     patch_extra_lines_before_dynamic = get_settings().config.max_extra_lines_before_dynamic_context
 
     file_original_lines = split_diff_lines(original_file_str)
     len_original_lines = len(file_original_lines)
+    if full_file_context:
+        # Each hunk's extension stops at its neighbouring hunks and at the file end, so a file-length
+        # extension renders every base line once.
+        patch_extra_lines_before = patch_extra_lines_after = len_original_lines
     patch_lines = split_diff_lines(patch_str)
     # Head lines are only consulted before each hunk, never after it.
     # Zero-length head hunks point to the line preceding an insertion/deletion.

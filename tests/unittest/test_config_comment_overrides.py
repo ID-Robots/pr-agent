@@ -53,7 +53,8 @@ COMMENT_OVERRIDABLE_KEYS = {
         "max_webhook_request_body_bytes", "model", "model_token_count_estimate_factor",
         "no_temperature_models", "output_run_cost", "output_run_details", "output_style",
         "patch_extension_skip_types",
-        "patch_extra_lines_after", "patch_extra_lines_before", "per_directory_settings_max_files",
+        "patch_extra_lines_after", "patch_extra_lines_before", "patch_full_file_context",
+        "per_directory_settings_max_files",
         "per_directory_settings_max_tree_pages", "persistent_inline_comments", "progress_gif_url",
         "progress_gif_width", "propagate_tool_errors", "publish_output", "publish_output_progress",
         "reaction_on_failure", "reaction_on_start", "reaction_on_success", "reasoning_effort",
@@ -149,7 +150,7 @@ COMMENT_OVERRIDABLE_KEYS = {
         "require_estimate_effort_to_review", "require_failure_modes", "require_merge_recommendation",
         "require_priority_files", "require_risk_assessment", "require_score_review",
         "require_security_review", "require_tests_review", "require_ticket_analysis_review",
-        "require_todo_scan", "review_heading",
+        "require_todo_scan", "review_heading", "second_pass_focus",
     }),
     "pr_similar_issue": frozenset({
         "max_issues_to_scan", "skip_comments", "vectordb",

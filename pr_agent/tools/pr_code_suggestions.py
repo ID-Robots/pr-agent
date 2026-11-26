@@ -39,6 +39,7 @@ from pr_agent.algo.pr_processing import (
     _get_all_models,
     add_ai_metadata_to_diff_files,
     append_filtered_file_names,
+    full_file_context_kwargs,
     get_effective_fallback_chain,
     get_pr_diff,
     get_pr_multi_diffs,
@@ -1091,6 +1092,7 @@ class PRCodeSuggestions:
             add_line_numbers_to_hunks=True,
             disable_extra_lines=False,
             output_token_reserve=output_token_reserve,
+            **full_file_context_kwargs(),
         )
         self.patches_diff_list = [self.patches_diff]
         self.patches_diff_no_line_number = self.remove_line_numbers([self.patches_diff])[0]
@@ -2141,7 +2143,8 @@ class PRCodeSuggestions:
                 max_calls=get_settings().pr_code_suggestions.max_number_of_calls,
                 add_line_numbers=True, return_coverage=True,
                 output_token_reserve=output_token_reserve,
-                include_filtered_file_names=False, deleted_files=deleted_files)  # decouple hunk with line numbers
+                include_filtered_file_names=False, deleted_files=deleted_files,
+                **full_file_context_kwargs())  # decouple hunk with line numbers
             self.patches_diff_list = packed_diffs.chunks
             self.patches_diff_list_no_line_numbers = self.remove_line_numbers(self.patches_diff_list)  # decouple hunk
 
@@ -2153,7 +2156,8 @@ class PRCodeSuggestions:
                 max_calls=get_settings().pr_code_suggestions.max_number_of_calls,
                 add_line_numbers=False, return_coverage=True,
                 output_token_reserve=output_token_reserve,
-                include_filtered_file_names=False, deleted_files=deleted_files)
+                include_filtered_file_names=False, deleted_files=deleted_files,
+                **full_file_context_kwargs())
             self.patches_diff_list_no_line_numbers = packed_diffs.chunks
             self.patches_diff_list = await self.convert_to_decoupled_with_line_numbers(
                 self.patches_diff_list_no_line_numbers,
@@ -2169,7 +2173,8 @@ class PRCodeSuggestions:
                     max_calls=get_settings().pr_code_suggestions.max_number_of_calls,
                     add_line_numbers=True, return_coverage=True,
                     output_token_reserve=output_token_reserve,
-                    include_filtered_file_names=False, deleted_files=deleted_files)  # decouple hunk with line numbers
+                    include_filtered_file_names=False, deleted_files=deleted_files,
+                    **full_file_context_kwargs())  # decouple hunk with line numbers
                 self.patches_diff_list = packed_diffs.chunks
                 self.patches_diff_list_no_line_numbers = self.remove_line_numbers(self.patches_diff_list)
 

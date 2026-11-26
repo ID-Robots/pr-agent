@@ -1,0 +1,13 @@
+# Candidate "per-repository instructions": baseline plus, for each repository, the
+# extra_instructions text that `python -m tools.review_eval.repo_instructions` generated from the
+# categories of the dev set's addressed references. Needs --repo-instructions PATH.
+
+[review_eval]
+description = "Baseline with per-repository extra instructions from the fixed-finding categories"
+commands = ["review", "improve"]
+repo_instructions = true
+
+[config]
+model = "anthropic/claude-sonnet-5-5"
+fallback_models = ["anthropic/claude-sonnet-5"]
+output_style = "coderabbit"

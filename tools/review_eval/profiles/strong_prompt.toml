@@ -1,0 +1,25 @@
+# Candidate "strong prompt": baseline plus extra instructions for /review and /improve that ask
+# only for concrete, verifiable defects, each with its file and line, and no style remarks.
+
+[review_eval]
+description = "Baseline with extra instructions asking only for concrete defects with file and line"
+commands = ["review", "improve"]
+
+[config]
+model = "anthropic/claude-sonnet-5-5"
+fallback_models = ["anthropic/claude-sonnet-5"]
+output_style = "coderabbit"
+
+[pr_reviewer]
+extra_instructions = """\
+Report only concrete, verifiable defects that the changed code really has: wrong results, crashes, \
+unhandled errors, security holes, race conditions, resource leaks or broken edge cases. For each \
+one, name the file and the line where it occurs and say how it fails. Do not report style, naming, \
+formatting, documentation or refactoring remarks. If there is no such defect, report none."""
+
+[pr_code_suggestions]
+extra_instructions = """\
+Report only concrete, verifiable defects that the changed code really has: wrong results, crashes, \
+unhandled errors, security holes, race conditions, resource leaks or broken edge cases. For each \
+one, name the file and the line where it occurs and say how it fails. Do not report style, naming, \
+formatting, documentation or refactoring remarks. If there is no such defect, report none."""

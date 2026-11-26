@@ -1,0 +1,11 @@
+# Baseline: PR-Agent defaults on Claude Sonnet 5.5 with output_style "coderabbit".
+# Every other table is a PR-Agent settings section; [review_eval] holds harness options.
+
+[review_eval]
+description = "PR-Agent defaults, Claude Sonnet 5.5, coderabbit output style"
+commands = ["review", "improve"]
+
+[config]
+model = "anthropic/claude-sonnet-5-5"
+fallback_models = ["anthropic/claude-sonnet-5"]
+output_style = "coderabbit"

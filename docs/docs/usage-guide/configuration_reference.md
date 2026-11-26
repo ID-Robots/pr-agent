@@ -97,6 +97,7 @@ See [Configuration options](../usage-guide/configuration_options.md#global-confi
 | `max_extra_lines_before_dynamic_context` | 10 | will try to include up to 10 extra lines before the hunk in the patch, until we reach an enclosing function or class |
 | `patch_extra_lines_before` | 5 | Number of extra lines (+3 default ones) to include before each hunk in the patch |
 | `patch_extra_lines_after` | 1 | Number of extra lines (+3 default ones) to include after each hunk in the patch |
+| `patch_full_file_context` | false | true/false: /review and /improve send each changed file whole; a diff over the token budget loses all extra lines, so raise max_model_tokens above 32000 |
 | `secret_provider` | "" | "" (disabled), "google_cloud_storage", or "aws_secrets_manager" for secure secret management |
 | `cli_mode` | false |  |
 | `output_relevant_configurations` | false |  |
@@ -187,6 +188,7 @@ See [Review](../tools/review.md#configuration-options).
 | `keep_review_guide_comment` | false | with output_style "coderabbit", also post the persistent PR Reviewer Guide comment |
 | `extra_instructions` | "" |  |
 | `num_max_findings` | 3 |  |
+| `second_pass_focus` | "" | Areas for one more /review model call that may add up to num_max_findings issues, e.g. "security, concurrency, error handling"; "" disables |
 | `final_update_message` | true |  |
 
 Azure DevOps also supplies verified PR-Agent inline key issues as dismissed when their status is `wontFix`

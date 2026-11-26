@@ -1,0 +1,15 @@
+# Candidate "low score threshold": baseline with the /improve score floor set explicitly to its
+# lowest value. The PR-Agent default is already 1 and 0 is read as 1, so against the defaults this
+# profile changes nothing; see "Score filters" in the README for what else filters by score.
+
+[review_eval]
+description = "Baseline with pr_code_suggestions.suggestions_score_threshold pinned at its floor (1)"
+commands = ["review", "improve"]
+
+[config]
+model = "anthropic/claude-sonnet-5-5"
+fallback_models = ["anthropic/claude-sonnet-5"]
+output_style = "coderabbit"
+
+[pr_code_suggestions]
+suggestions_score_threshold = 1

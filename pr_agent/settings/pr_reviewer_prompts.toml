@@ -39,6 +39,14 @@ Extra instructions from the user:
 {{ extra_instructions }}
 ======
 {% endif %}
+{%- if second_pass_focus is defined and second_pass_focus %}
+
+
+Focused second pass:
+======
+Another review of this PR already ran. In this pass, list in key_issues_to_review only concrete defects in these areas: {{ second_pass_focus }}. Each issue must name the exact file and lines and the realistic input or sequence that triggers it. Leave out style, naming, documentation, missing tests and general suggestions. An empty list is the right answer when you find no such defect.
+======
+{% endif %}
 {%- if artifact_context is defined and artifact_context %}
 
 Artifact-analysis guidance from configured settings (subordinate to the task and instructions above):

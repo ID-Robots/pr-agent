@@ -1,0 +1,20 @@
+# Candidate "Opus for big PRs": the primary model is Claude Opus 5.5, and [model_routing] sends a
+# small pull request (at most 10 changed files and 40000 patch characters) to the baseline Claude
+# Sonnet 5.5. Routing only replaces the regular tier, so config.model_reasoning is pinned to Sonnet
+# 5.5 to keep the /improve self-reflection on the baseline model for every pull request.
+# config.model_reasoning is commented out in configuration.toml, so loading this profile warns that
+# it is not a default setting; PR-Agent reads it all the same.
+
+[review_eval]
+description = "Opus 5.5 for big pull requests, Sonnet 5.5 for small ones and for self-reflection"
+commands = ["review", "improve"]
+
+[config]
+model = "anthropic/claude-opus-5-5"
+fallback_models = ["anthropic/claude-sonnet-5"]
+output_style = "coderabbit"
+model_reasoning = "anthropic/claude-sonnet-5-5"
+
+[model_routing]
+enable = true
+rules = [{ max_files = 10, max_patch_chars = 40000, model = "anthropic/claude-sonnet-5-5" }]

@@ -213,6 +213,8 @@ PER_DIRECTORY_HOST_ONLY_KEYS_BY_SECTION = {
         "require_security_review", "require_ticket_analysis_review", "max_previous_findings_chars",
         # The coderabbit output style publishes every finding inline, like inline_key_issues.
         "output_style",
+        # A focus adds one more model call to every /review.
+        "second_pass_focus",
     }),
     "pr_description": frozenset({
         "publish_labels", "enable_large_pr_handling", "max_ai_calls", "async_ai_calls",
