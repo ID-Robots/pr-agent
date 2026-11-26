@@ -641,6 +641,7 @@ enable_help_text = true
 num_max_findings = 4
 enable_large_pr_chunking = true
 max_number_of_calls = 9999
+second_pass_focus = "security"
 inline_key_issues = true
 # The coderabbit output style publishes findings inline too, so it is denied per directory.
 output_style = "coderabbit"
@@ -739,6 +740,7 @@ dual_publishing_score_threshold = 7
         # not multiply AI calls on their own.
         assert get_settings().pr_reviewer.enable_large_pr_chunking is False
         assert get_settings().pr_reviewer.max_number_of_calls != 9999
+        assert get_settings().pr_reviewer.second_pass_focus == ""
         assert get_settings().pr_description.enable_large_pr_handling != 999999
         assert get_settings().pr_description.max_ai_calls != 400
         assert get_settings().pr_description.async_ai_calls is True

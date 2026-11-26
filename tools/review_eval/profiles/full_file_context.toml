@@ -1,0 +1,14 @@
+# Candidate "full file context": baseline plus config.patch_full_file_context, so /review and
+# /improve see every changed file whole instead of its hunks only. The token budget is raised with
+# it: at the default max_model_tokens (32000) a diff over the budget loses all extra lines again.
+
+[review_eval]
+description = "Baseline with whole changed files as context and a 200000-token budget"
+commands = ["review", "improve"]
+
+[config]
+model = "anthropic/claude-sonnet-5-5"
+fallback_models = ["anthropic/claude-sonnet-5"]
+output_style = "coderabbit"
+patch_full_file_context = true
+max_model_tokens = 200000

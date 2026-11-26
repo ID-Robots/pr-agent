@@ -38,6 +38,7 @@ from pr_agent.algo.pr_processing import (
     PreparedPRDiff,
     add_ai_metadata_to_diff_files,
     append_filtered_file_names,
+    full_file_context_kwargs,
     get_pr_diff,
     get_pr_multi_diffs,
     retry_with_fallback_models,
@@ -61,7 +62,7 @@ from pr_agent.algo.run_output import (
     show_relevant_configurations,
     show_run_details,
 )
-from pr_agent.algo.setting_utils import _as_bool_setting
+from pr_agent.algo.setting_utils import _as_bool_setting, normalize_setting_list
 from pr_agent.algo.skills_loader import get_skills_context
 from pr_agent.algo.structural_reach import build_structural_reach
 from pr_agent.algo.token_budget import AttemptTokenBudget
@@ -292,6 +293,8 @@ class PRReviewer:
             'duplicate_prompt_examples': get_settings().config.get('duplicate_prompt_examples', False),
             "date": datetime.datetime.now().strftime('%Y-%m-%d'),
             "coderabbit_style": self._coderabbit_style_enabled(),
+            # set only for the focused second pass (pr_reviewer.second_pass_focus)
+            "second_pass_focus": "",
         }
 
     def parse_incremental(self, args: list[str]):
@@ -967,6 +970,7 @@ class PRReviewer:
             "add_line_numbers_to_hunks": True,
             "disable_extra_lines": False,
             "return_remaining_files": True,
+            **full_file_context_kwargs(),
         }
         if callable(output_token_reserve):
             diff_kwargs["output_token_reserve"] = output_token_reserve
@@ -993,8 +997,9 @@ class PRReviewer:
         if self.patches_diff:
             get_logger().debug("PR diff", diff=self.patches_diff)
             prediction = await self._get_prediction(model)
-            self._load_valid_review_yaml(prediction)
+            first_pass = self._load_valid_review_yaml(prediction)
             self.prediction = prediction
+            await self._add_second_pass_findings(model, first_pass)
         elif not self.remaining_files_list and not self.partial_files_list:
             # Every changed file was filtered out (lockfile, asset, ignore rule), so there is
             # nothing left to review. Skip the model chain instead of failing the command.
@@ -1248,7 +1253,51 @@ class PRReviewer:
             if progress is not None:
                 await progress.record_settled()
 
-    async def _get_prediction(self, model: str, patches_diff: str | None = None) -> str:
+    @staticmethod
+    def _second_pass_focus() -> str:
+        """Return pr_reviewer.second_pass_focus as one comma-separated string; empty disables the pass."""
+        value = get_settings().pr_reviewer.get("second_pass_focus", "")
+        if isinstance(value, str) and value.strip().lower() in ("false", "no", "off", "0", "none"):
+            return ""
+        return ", ".join(item.strip() for item in normalize_setting_list(value)
+                         if isinstance(item, str) and item.strip())
+
+    async def _add_second_pass_findings(self, model: str, first_pass: dict) -> None:
+        """Ask the same model once more for concrete defects in the second-pass focus areas only.
+
+        The new key issues follow the first pass's, without repeats, and the pass may add up to
+        `num_max_findings` of its own. A failed or unparsable pass keeps the first-pass review.
+        """
+        focus = self._second_pass_focus()
+        if not focus:
+            return
+        try:
+            prediction = await self._get_prediction(model, second_pass_focus=focus)
+            get_logger().debug("Focused second review pass", artifact=prediction)
+            second_pass = self._load_valid_review_yaml(prediction, source="focused second review pass")
+            second_issues = second_pass["review"].get("key_issues_to_review")
+            second_issues = [issue for issue in second_issues if isinstance(issue, dict)] \
+                if isinstance(second_issues, list) else []
+            first_issues = first_pass["review"].get("key_issues_to_review")
+            first = {"review": {"key_issues_to_review": first_issues if isinstance(first_issues, list) else []}}
+            first_count = len(all_key_issues([first]))
+            try:
+                limit = first_count + max(0, int(get_settings().pr_reviewer.num_max_findings))
+            except (TypeError, ValueError):
+                limit = None
+            merged = merge_review_chunks([first, {"review": {"key_issues_to_review": second_issues}}],
+                                         max_findings=limit)["review"]
+        except Exception as error:
+            get_logger().warning(
+                f"Focused second review pass failed with {model}, keeping the first-pass review: {error}")
+            return
+        added = len(merged["key_issues_to_review"]) - first_count
+        get_logger().info(f"Focused second review pass added {added} key issue(s)")
+        if added > 0:
+            self.prediction_data = {"review": {**first_pass["review"], **merged}}
+
+    async def _get_prediction(self, model: str, patches_diff: str | None = None, *,
+                              second_pass_focus: str = "") -> str:
         """
         Generate an AI prediction for the pull request review.
 
@@ -1256,11 +1305,14 @@ class PRReviewer:
             model: A string representing the AI model to be used for the prediction.
             patches_diff: The diff to review. Defaults to the whole prepared diff; the chunked
                 flow passes one chunk per call.
+            second_pass_focus: The areas a focused second pass asks about; empty for a normal review.
 
         Returns:
             A string representing the AI prediction for the pull request review.
         """
         variables = copy.deepcopy(self.vars)
+        if second_pass_focus:
+            variables["second_pass_focus"] = second_pass_focus
         patches_diff = self.patches_diff if patches_diff is None else patches_diff
         budget = self._review_attempt_budget(model)
         fitted = budget.fit_prompt_variable(

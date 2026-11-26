@@ -1,0 +1,19 @@
+# Candidate "more findings": baseline plus a higher cap on findings per review and on
+# suggestions per /improve chunk (PR-Agent defaults: 3 and 3), with large-PR review chunking on so
+# a big pull request is reviewed in several chunks.
+
+[review_eval]
+description = "Baseline with up to 6 review findings and 6 suggestions per chunk, review chunking on"
+commands = ["review", "improve"]
+
+[config]
+model = "anthropic/claude-sonnet-5-5"
+fallback_models = ["anthropic/claude-sonnet-5"]
+output_style = "coderabbit"
+
+[pr_reviewer]
+num_max_findings = 6
+enable_large_pr_chunking = true
+
+[pr_code_suggestions]
+num_code_suggestions_per_chunk = 6

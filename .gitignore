@@ -21,3 +21,5 @@ docs/site/
 .qodo
 poetry.lock
 .log
+# Private review benchmark data, results and caches (tools/review_eval)
+.eval-data/

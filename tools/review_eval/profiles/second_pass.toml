@@ -1,0 +1,15 @@
+# Candidate "second pass": baseline plus pr_reviewer.second_pass_focus, one more /review model call
+# on the same diff that looks only for concrete defects in the named areas and may add up to
+# num_max_findings key issues.
+
+[review_eval]
+description = "Baseline with a second /review pass on security, concurrency and error handling"
+commands = ["review", "improve"]
+
+[config]
+model = "anthropic/claude-sonnet-5-5"
+fallback_models = ["anthropic/claude-sonnet-5"]
+output_style = "coderabbit"
+
+[pr_reviewer]
+second_pass_focus = "security, concurrency, error handling"
